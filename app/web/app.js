@@ -856,5 +856,3 @@ const App = {
   },
   openUrl(u) { api("/api/open_url", { body: { url: u } }); },
 };
-
-App.init();

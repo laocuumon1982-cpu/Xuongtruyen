@@ -10,8 +10,8 @@ from . import paths
 _lock = threading.Lock()
 
 DEFAULT_SETTINGS = {
-    "provider": "lmstudio",
-    "base_url": "http://127.0.0.1:1234/v1",
+    "provider": "builtin",
+    "base_url": "http://127.0.0.1:8091/v1",
     "api_key": "",
     "model": "",
     "temperature": 0.85,
@@ -25,9 +25,17 @@ DEFAULT_SETTINGS = {
     "window_w": 1400,
     "window_h": 900,
     "check_update_on_start": True,
+    "engine_port": 8091,
+    "engine_ctx": 16384,
+    "engine_model": "",
+    "engine_autostart": True,
+    "models_dir": "",
+    "extra_model_dirs": [],
+    "welcomed": False,
 }
 
 PROVIDER_PRESETS = {
+    "builtin": {"label": "Có sẵn trong app (llama.cpp)", "base_url": "http://127.0.0.1:8091/v1"},
     "lmstudio": {"label": "LM Studio", "base_url": "http://127.0.0.1:1234/v1"},
     "ollama": {"label": "Ollama", "base_url": "http://127.0.0.1:11434/v1"},
     "koboldcpp": {"label": "KoboldCpp", "base_url": "http://127.0.0.1:5001/v1"},

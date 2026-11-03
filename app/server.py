@@ -13,7 +13,7 @@ import traceback
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import exporter, llm, paths, prompts, storage, updater
+from . import engine, exporter, llm, paths, prompts, storage, updater
 from .version import APP_NAME, APP_VERSION, GITHUB_REPO
 
 WINDOW = None          # cửa sổ pywebview (nếu có) – dùng cho hộp thoại lưu file
@@ -92,6 +92,14 @@ class Handler(BaseHTTPRequestHandler):
             if p.startswith("/api/stories/"):
                 st = storage.get_story(p.rsplit("/", 1)[1])
                 return self._json(st) if st else self._json({"error": "Không tìm thấy truyện"}, 404)
+            if p == "/api/engine/status":
+                st = engine.status()
+                if "gpu" in urllib.parse.parse_qs(u.query):
+                    st["gpu"] = engine.gpu_info()
+                st["models_dir"] = engine.models_dir()
+                return self._json(st)
+            if p == "/api/engine/catalog":
+                return self._json({"catalog": engine.catalog(), "local": engine.local_models()})
             if p == "/api/update/check":
                 try:
                     return self._json(updater.check())
@@ -166,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True})
                 threading.Timer(0.8, lambda: updater.apply_and_restart(_UPDATE["dir"], _UPDATE["zip"])).start()
                 return None
+            if p.startswith("/api/engine/"):
+                return self._engine(p.rsplit("/", 1)[1], body)
             if p.startswith("/api/ai/"):
                 return self._ai(p.rsplit("/", 1)[1], body)
             self.send_error(404)
@@ -185,6 +195,73 @@ class Handler(BaseHTTPRequestHandler):
             st["id"] = p.rsplit("/", 1)[1]
             return self._json({"ok": True, "updated": storage.save_story(st)["updated"]})
         self.send_error(404)
+
+    # ---------- bộ máy model tích hợp ----------
+    def _engine(self, act, body):
+        try:
+            if act == "install":
+                return self._json({"task": engine.install_engine(body.get("backend"))["id"]})
+            if act == "download":
+                cid = body.get("id")
+                c = next((x for x in engine.CATALOG if x["id"] == cid), None)
+                repo = c["repo"] if c else (body.get("repo") or "").strip()
+                quant = (c["quant"] if c else (body.get("quant") or "Q4_K_M")).strip()
+                if not repo or "/" not in repo:
+                    return self._json({"error": "Nhập tên repo dạng tác-giả/tên-model"}, 400)
+                if repo.startswith("https://"):
+                    repo = "/".join(repo.split("huggingface.co/", 1)[-1].split("/")[:2])
+                t = engine.download_model(repo, quant, name=(c or {}).get("name") or repo.split("/")[-1],
+                                          start_after=bool(body.get("start")), catalog_id=cid)
+                return self._json({"task": t["id"]})
+            if act == "quick":
+                c = next((x for x in engine.CATALOG if x["id"] == body.get("id")), engine.CATALOG[0])
+                if not engine.engine_info()["installed"]:
+                    engine.install_engine()
+                loc = next((m for m in engine.local_models() if m.get("catalog_id") == c["id"]), None)
+                if loc:
+                    def go():
+                        et = next((t for t in engine.TASKS.values() if t["kind"] == "engine" and t["state"] == "running"), None)
+                        while et and et["state"] == "running":
+                            time.sleep(1)
+                        engine.start_server(loc["path"], name=c["name"])
+                    threading.Thread(target=go, daemon=True).start()
+                    return self._json({"ok": True})
+                t = engine.download_model(c["repo"], c["quant"], name=c["name"], start_after=True, catalog_id=c["id"])
+                return self._json({"task": t["id"]})
+            if act == "cancel":
+                engine.cancel_task(body.get("task"))
+                return self._json({"ok": True})
+            if act == "start":
+                return self._json(engine.start_server(body["path"], body.get("ctx"), body.get("name")))
+            if act == "stop":
+                engine.stop_server()
+                return self._json(engine.status())
+            if act == "delete_model":
+                engine.delete_model(body["path"])
+                return self._json({"ok": True})
+            if act == "pick_folder":
+                if WINDOW is None:
+                    return self._json({"error": "Hãy nhập đường dẫn thư mục thủ công."})
+                import webview
+                res = WINDOW.create_file_dialog(webview.FOLDER_DIALOG)
+                if not res:
+                    return self._json({"cancelled": True})
+                return self._json({"path": res if isinstance(res, str) else res[0]})
+            if act == "add_folder":
+                d = (body.get("path") or "").strip()
+                if not os.path.isdir(d):
+                    return self._json({"error": "Thư mục không tồn tại"}, 400)
+                s = storage.load_settings()
+                dirs = [x for x in (s.get("extra_model_dirs") or []) if x != d] + [d]
+                storage.save_settings({"extra_model_dirs": dirs})
+                return self._json({"ok": True})
+            if act == "remove_folder":
+                s = storage.load_settings()
+                storage.save_settings({"extra_model_dirs": [x for x in (s.get("extra_model_dirs") or []) if x != body.get("path")]})
+                return self._json({"ok": True})
+            return self._json({"error": "Không rõ thao tác"}, 404)
+        except Exception as e:  # noqa
+            return self._json({"error": str(e)}, 400)
 
     # ---------- xuất file ----------
     def _export(self, body):
@@ -317,7 +394,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._emit(t="end", stopped=stop())
         except llm.LLMError as e:
-            self._emit(t="error", d=str(e))
+            msg = str(e)
+            if settings.get("provider") == "builtin" and "kết nối" in msg:
+                st = engine.SERVER["state"]
+                msg = ("Model đang được nạp, đợi vài giây rồi thử lại nhé." if st == "loading" else
+                       "Chưa có model nào đang chạy. Bấm nút 🧠 Model AI ở thanh trên để tải và chạy model.")
+            self._emit(t="error", d=msg)
         except ClientGone:
             pass
         except Exception as e:  # noqa

@@ -8,7 +8,7 @@ import threading
 import time
 import webbrowser
 
-from . import server, storage
+from . import engine, server, storage
 from .version import APP_NAME, APP_VERSION
 
 
@@ -54,6 +54,7 @@ def _browser_mode(url):
     while True:
         time.sleep(5)
         if time.time() - server.LAST_PING[0] > 45:
+            engine.stop_server()
             os._exit(0)
 
 
@@ -63,6 +64,7 @@ def main():
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{port}/"
+    threading.Thread(target=engine.autostart, daemon=True).start()
     print(f"{APP_NAME} {APP_VERSION} đang chạy tại {url}")
 
     if "--browser" in sys.argv:
@@ -92,6 +94,7 @@ def main():
     except Exception:  # noqa
         server.WINDOW = None
         return _browser_mode(url)
+    engine.stop_server()
     os._exit(0)
 
 
