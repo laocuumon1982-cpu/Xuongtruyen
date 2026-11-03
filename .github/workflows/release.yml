@@ -1,0 +1,64 @@
+name: Build portable
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cài thư viện
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Lấy số phiên bản
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V=$(python -c "import re;print(re.search(r'APP_VERSION = \"(.+?)\"',open('app/version.py',encoding='utf-8').read()).group(1))"); fi
+          sed -i "s/^APP_VERSION = .*/APP_VERSION = \"$V\"/" app/version.py
+          echo "v=$V" >> $GITHUB_OUTPUT
+          cat app/version.py
+
+      - name: Kiểm tra mã nguồn
+        run: python -c "import app.server, app.main, app.exporter, app.updater; print('ok')"
+
+      - name: Build bằng PyInstaller
+        run: >
+          pyinstaller --noconfirm --clean --windowed --name XuongTruyen
+          --icon assets/icon.ico
+          --add-data "app/web;app/web"
+          --collect-all webview --collect-all clr_loader --collect-all pythonnet
+          --collect-data docx
+          XuongTruyen.py
+
+      - name: Đóng gói bản portable
+        shell: pwsh
+        run: |
+          Copy-Item README.md dist/XuongTruyen/HUONG_DAN.md
+          Compress-Archive -Path dist/XuongTruyen -DestinationPath "XuongTruyen_Portable_v${{ steps.ver.outputs.v }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XuongTruyen_Portable_v${{ steps.ver.outputs.v }}
+          path: XuongTruyen_Portable_v${{ steps.ver.outputs.v }}.zip
+
+      - name: Tạo Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Xưởng Truyện v${{ steps.ver.outputs.v }}
+          files: XuongTruyen_Portable_v${{ steps.ver.outputs.v }}.zip
+          generate_release_notes: true

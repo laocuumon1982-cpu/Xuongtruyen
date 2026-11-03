@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xưởng Truyện</title>
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand" onclick="App.goLibrary()" title="Về thư viện">
+    <img src="icon.svg" alt="" class="logo">
+    <span class="brand-name">Xưởng Truyện</span>
+  </div>
+  <nav class="crumbs" id="crumbs"></nav>
+  <div class="top-actions">
+    <button class="pill" id="modelPill" onclick="App.openSettings()" title="Model đang dùng">
+      <span class="dot" id="modelDot"></span><span id="modelName">Chưa kết nối model</span>
+    </button>
+    <button class="icon-btn" onclick="App.openUpdate()" title="Kiểm tra cập nhật">⟳ <span id="updBadge" class="badge hidden">mới</span></button>
+    <button class="icon-btn" onclick="App.toggleTheme()" title="Sáng / tối">🌓</button>
+    <button class="icon-btn" onclick="App.openSettings()" title="Cài đặt">⚙</button>
+  </div>
+</header>
+
+<!-- ================= THƯ VIỆN ================= -->
+<main id="libraryView" class="view">
+  <section class="hero">
+    <h1>Ném một ý tưởng vào xưởng.</h1>
+    <p class="sub">AI lên tên truyện, nhân vật, thế giới và dàn ý từng chương. Rồi bạn viết cùng nó.</p>
+
+    <div class="idea-card">
+      <div class="seg" id="ideaMode">
+        <button class="on" data-mode="idea">💡 Ý tưởng</button>
+        <button data-mode="draft">📄 Dán bản nháp</button>
+      </div>
+      <textarea id="ideaText" placeholder="Ví dụ: Một cô thợ đồng hồ ở Hội An phát hiện chiếc đồng hồ của ông nội có thể quay ngược 7 phút, và mỗi lần dùng, ai đó trong thành phố lại quên mất cô…"></textarea>
+      <div class="draft-tools hidden" id="draftTools">
+        <label class="ghost-btn">Mở file .txt / .docx<input type="file" id="draftFile" accept=".txt,.md,.docx" hidden></label>
+        <label class="chk"><input type="checkbox" id="draftAsCh1" checked> Đưa bản nháp vào Chương 1</label>
+      </div>
+      <div class="idea-opts">
+        <label>Số chương <input type="number" id="optChapters" min="1" max="200" value="12"></label>
+        <label>Thể loại <input type="text" id="optGenre" placeholder="tự chọn" list="genreList"></label>
+        <datalist id="genreList">
+          <option>Tiên hiệp</option><option>Huyền huyễn</option><option>Ngôn tình</option><option>Đô thị</option>
+          <option>Trinh thám</option><option>Kinh dị</option><option>Khoa học viễn tưởng</option><option>Lịch sử</option>
+          <option>Xuyên không</option><option>Hài hước</option><option>Fantasy phương Tây</option><option>Đam mỹ</option>
+        </datalist>
+        <label>Ngôn ngữ
+          <select id="optLang"><option>Tiếng Việt</option><option>English</option></select>
+        </label>
+        <label>Nội dung
+          <select id="optRating">
+            <option value="all">Mọi lứa tuổi</option>
+            <option value="18">18+</option>
+            <option value="nsfw">NSFW (18+ có cảnh nóng)</option>
+          </select>
+        </label>
+        <button class="primary" id="btnPlan" onclick="App.plan()">✨ Lên truyện</button>
+      </div>
+      <div class="plan-live hidden" id="planLive">
+        <div class="live-head"><span class="spinner"></span><span id="planStatus">AI đang dựng truyện…</span>
+          <button class="ghost-btn sm" onclick="App.stop()">⏹ Dừng</button></div>
+        <pre id="planStream"></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="shelf">
+    <div class="shelf-head">
+      <h2>Tủ truyện</h2>
+      <div class="shelf-tools">
+        <input type="search" id="libSearch" placeholder="Tìm truyện…" oninput="App.renderLibrary()">
+        <button class="ghost-btn" onclick="App.blankStory()">＋ Truyện trống</button>
+        <button class="ghost-btn" onclick="App.openFolder()">📁 Thư mục dữ liệu</button>
+      </div>
+    </div>
+    <div class="grid" id="storyGrid"></div>
+  </section>
+</main>
+
+<!-- ================= TRUYỆN ================= -->
+<main id="storyView" class="view hidden">
+  <aside class="side">
+    <div class="side-title" id="sideTitle"></div>
+    <div class="side-nav">
+      <button data-pane="overview">📘 Tổng quan</button>
+      <button data-pane="characters">👥 Nhân vật</button>
+      <button data-pane="world">🌍 Thế giới</button>
+      <button data-pane="outline">🧭 Dàn ý</button>
+    </div>
+    <div class="side-sec">Chương <button class="mini" title="Thêm chương" onclick="App.addChapter()">＋</button></div>
+    <div class="ch-list" id="chList"></div>
+    <div class="side-foot">
+      <span id="saveState">Đã lưu</span>
+    </div>
+  </aside>
+
+  <section class="center" id="center"></section>
+
+  <aside class="chat" id="chatPanel">
+    <div class="chat-head">
+      <b>💬 Trợ lý truyện</b>
+      <div>
+        <button class="mini" title="Xoá hội thoại" onclick="App.clearChat()">🗑</button>
+        <button class="mini" title="Thu gọn" onclick="App.toggleChat()">⇥</button>
+      </div>
+    </div>
+    <div class="chat-log" id="chatLog"></div>
+    <div class="chat-quick" id="chatQuick">
+      <button onclick="App.quickChat('Gợi ý 3 plot twist bất ngờ cho truyện này')">Plot twist</button>
+      <button onclick="App.quickChat('Chỉ ra các điểm chưa logic hoặc lỗ hổng trong cốt truyện')">Soát lỗi logic</button>
+      <button onclick="App.quickChat('Nhân vật nào còn mờ nhạt? Gợi ý cách làm họ sống động hơn')">Nhân vật</button>
+    </div>
+    <div class="chat-input">
+      <textarea id="chatText" rows="3" placeholder="Bàn về truyện… (Enter để gửi, Shift+Enter xuống dòng)"></textarea>
+      <button class="primary" id="chatSend" onclick="App.sendChat()">Gửi</button>
+    </div>
+  </aside>
+  <button class="chat-tab hidden" id="chatTab" onclick="App.toggleChat()">💬</button>
+</main>
+
+<!-- Menu khi bôi đen -->
+<div class="sel-menu hidden" id="selMenu">
+  <button data-act="rewrite">↻ Viết lại</button>
+  <button data-act="expand">⤢ Mở rộng</button>
+  <button data-act="shorten">⤡ Rút gọn</button>
+  <div class="tone-wrap">
+    <button data-act="tone-menu">🎭 Đổi giọng ▾</button>
+    <div class="tone-list hidden" id="toneList"></div>
+  </div>
+  <button data-act="custom">✎ Tuỳ ý…</button>
+</div>
+
+<!-- Kết quả sửa đoạn -->
+<div class="edit-pop hidden" id="editPop">
+  <div class="edit-head"><b id="editTitle">Viết lại</b><span class="spinner" id="editSpin"></span></div>
+  <div class="edit-body" id="editBody"></div>
+  <div class="edit-actions">
+    <button class="primary" id="editReplace">✔ Thay thế</button>
+    <button class="ghost-btn" id="editInsert">Chèn phía sau</button>
+    <button class="ghost-btn" id="editRetry">↻ Thử lại</button>
+    <button class="ghost-btn" id="editCancel">Huỷ</button>
+  </div>
+</div>
+
+<!-- Modal chung -->
+<div class="modal-bg hidden" id="modalBg">
+  <div class="modal" id="modal"></div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
