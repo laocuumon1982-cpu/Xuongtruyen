@@ -44,4 +44,4 @@ run_dev.bat          :: chạy bằng Python 3.10+
 build_portable.bat   :: tự build ra dist\XuongTruyen\XuongTruyen.exe
 ```
 
-Phát hành bản mới: sửa `app/version.py`, rồi đẩy tag `vX.Y.Z` lên GitHub – GitHub Actions sẽ build bản portable và tạo Release; nút ⟳ trong app sẽ thấy bản mới.
+Phát hành bản mới: tăng số trong `app/version.py` rồi đẩy lên nhánh `main` – GitHub Actions tự build bản portable, tạo tag và Release; nút ⟳ trong app sẽ thấy bản mới.

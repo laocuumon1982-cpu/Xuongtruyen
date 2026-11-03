@@ -2,7 +2,11 @@ name: Build portable
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+    paths:
+      - "app/version.py"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
@@ -30,7 +34,10 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V=$(python -c "import re;print(re.search(r'APP_VERSION = \"(.+?)\"',open('app/version.py',encoding='utf-8').read()).group(1))"); fi
           sed -i "s/^APP_VERSION = .*/APP_VERSION = \"$V\"/" app/version.py
           echo "v=$V" >> $GITHUB_OUTPUT
+          if gh release view "v$V" >/dev/null 2>&1; then echo "exists=1" >> $GITHUB_OUTPUT; else echo "exists=0" >> $GITHUB_OUTPUT; fi
           cat app/version.py
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Kiểm tra mã nguồn
         run: python -c "import app.server, app.main, app.exporter, app.updater; print('ok')"
@@ -56,9 +63,11 @@ jobs:
           path: XuongTruyen_Portable_v${{ steps.ver.outputs.v }}.zip
 
       - name: Tạo Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.ver.outputs.exists == '0'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.v }}
+          target_commitish: ${{ github.sha }}
           name: Xưởng Truyện v${{ steps.ver.outputs.v }}
           files: XuongTruyen_Portable_v${{ steps.ver.outputs.v }}.zip
           generate_release_notes: true
