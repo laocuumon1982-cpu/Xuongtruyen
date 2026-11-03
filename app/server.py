@@ -83,6 +83,11 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/settings":
                 return self._json({"settings": storage.load_settings(), "presets": storage.PROVIDER_PRESETS})
             if p == "/api/models":
+                st = storage.load_settings()
+                if st.get("provider") == "builtin" and engine.SERVER["state"] != "ready":
+                    msg = {"loading": "Model đang được nạp, đợi vài giây rồi bấm lại."}.get(
+                        engine.SERVER["state"], "Chưa chạy model nào. Đóng cài đặt, bấm nút 🧠 trên thanh trên cùng để tải và chạy model.")
+                    return self._json({"error": msg, "models": []})
                 try:
                     return self._json({"models": llm.list_models(storage.load_settings())})
                 except llm.LLMError as e:
@@ -239,6 +244,18 @@ class Handler(BaseHTTPRequestHandler):
             if act == "delete_model":
                 engine.delete_model(body["path"])
                 return self._json({"ok": True})
+            if act == "install_files":
+                files = body.get("files") or []
+                if not files:
+                    if WINDOW is None:
+                        return self._json({"error": "Không mở được hộp thoại chọn file."})
+                    import webview
+                    res = WINDOW.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
+                                                    file_types=("Gói llama.cpp (*.zip)", "Tất cả (*.*)"))
+                    if not res:
+                        return self._json({"cancelled": True})
+                    files = list(res)
+                return self._json({"engine": engine.install_engine_from_files(files)})
             if act == "pick_folder":
                 if WINDOW is None:
                     return self._json({"error": "Hãy nhập đường dẫn thư mục thủ công."})

@@ -134,7 +134,9 @@ Object.assign(App, {
       <div class="mc-row"><b>Bộ máy</b><span>${e.installed ? "✔ llama.cpp " + esc(e.version) + " · " + esc(e.backend) : "Chưa cài"}</span>
         ${et && et.state === "running" ? "" : `<select id="mcBackend" class="sm-sel" title="Loại bộ máy">
           ${[["cuda12", "NVIDIA CUDA 12"], ["cuda13", "NVIDIA CUDA 13"], ["vulkan", "Vulkan (AMD/Intel/NVIDIA)"], ["cpu", "Chỉ CPU"]].map(([v, l]) => `<option value="${v}" ${v === (e.backend || (gpu ? "cuda12" : "vulkan")) ? "selected" : ""}>${l}</option>`).join("")}
-        </select><button class="ghost-btn sm" onclick="App.installEngine()">${e.installed ? "⟳ Cập nhật / cài lại" : "⬇ Cài bộ máy"}</button>`}</div>
+        </select><button class="ghost-btn sm" onclick="App.installEngine()">${e.installed ? "⟳ Cập nhật / cài lại" : "⬇ Cài bộ máy"}</button>
+        <button class="ghost-btn sm" title="Đã tự tải gói llama.cpp (.zip) từ GitHub? Chọn file để cài" onclick="App.installEngineZip()">📦 Chọn file .zip</button>`}</div>
+      ${et && et.state === "error" ? `<div class="note" style="color:var(--danger)">${esc(et.msg)}<br>Cách thủ công: mở <a href="#" onclick="App.openUrl('https://github.com/ggml-org/llama.cpp/releases');return false">trang llama.cpp</a>, tải 2 file <code>llama-…-bin-win-cuda-12.4-x64.zip</code> và <code>cudart-llama-bin-win-cuda-12.4-x64.zip</code>, rồi bấm “📦 Chọn file .zip” và chọn cả 2.</div>` : ""}
       ${et && et.state === "running" ? this.progressHTML(et) : ""}
       <div class="mc-row"><b>Model</b><span>${stLabel}${s.name && s.state !== "stopped" ? " · " + esc(s.name) : ""}</span>
         <label class="note" style="display:flex;gap:6px;align-items:center">Context
@@ -179,6 +181,13 @@ Object.assign(App, {
     const b = $("#mcBackend");
     const r = await api("/api/engine/install", { body: { backend: b ? b.value : undefined } });
     if (r.error) toast(r.error, true);
+  },
+  async installEngineZip() {
+    const r = await api("/api/engine/install_files", { body: {} });
+    if (r.cancelled) return;
+    if (r.error) { toast(r.error, true, 8000); return; }
+    toast("Đã cài bộ máy llama.cpp " + (r.engine.version || ""));
+    this.openModels();
   },
   async dlModel(id, start) {
     const r = await api("/api/engine/download", { body: { id, start } });

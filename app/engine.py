@@ -238,7 +238,9 @@ def default_backend():
     return "vulkan"
 
 
-def _pick_assets(assets, backend):
+def _pick_assets(assets, backend, fallback=True):
+    """Chọn gói Windows x64 phù hợp. Chấp nhận cả kiểu tên mới (cuda-12.4) lẫn cũ (cuda-cu12.4).
+    fallback=False: chỉ nhận đúng loại yêu cầu (CUDA phải kèm gói cudart)."""
     names = {a["name"]: a for a in assets}
 
     def find(rx):
@@ -248,18 +250,89 @@ def _pick_assets(assets, backend):
         return None
 
     if backend.startswith("cuda"):
-        major = backend[4:] or "12"
-        main = find(rf"^llama-.*-bin-win-cuda-{major}[\d.]*-x64\.zip$")
-        if main:
-            ver = re.search(r"cuda-([\d.]+)-x64", main["name"]).group(1)
-            rt = find(rf"^cudart-llama-bin-win-cuda-{re.escape(ver)}-x64\.zip$")
-            return [main] + ([rt] if rt else [])
-    if backend in ("cuda12", "cuda13", "vulkan"):
+        majors = [backend[4:] or "12"]
+        if fallback:
+            majors += [m for m in ("12", "13") if m not in majors]
+        for major in majors:
+            main = find(rf"^llama-.*-bin-win-cuda-(cu)?{major}[\d.]*-x64\.zip$")
+            if main:
+                ver = re.search(r"cuda-(?:cu)?([\d.]+)-x64", main["name"], re.I).group(1)
+                rt = find(rf"^cudart-llama-bin-win-(cuda-)?(cu)?{re.escape(ver)}-x64\.zip$")
+                if rt:
+                    return [main, rt]
+                if fallback:
+                    return [main]
+        if not fallback:
+            return []
+    if backend.startswith("cuda") or backend == "vulkan":
         a = find(r"^llama-.*-bin-win-vulkan-x64\.zip$")
         if a:
             return [a]
-    a = find(r"^llama-.*-bin-win-cpu-x64\.zip$")
+        if not fallback:
+            return []
+    a = find(r"^llama-.*-bin-win-(cpu|avx2)-x64\.zip$")
     return [a] if a else []
+
+
+def _find_release(backend):
+    """llama.cpp đánh dấu mọi bản là pre-release nên /releases/latest không dùng được –
+    quét các bản mới nhất và lấy bản đầu tiên có đủ gói Windows."""
+    base = f"{GH_API}/repos/ggml-org/llama.cpp/releases"
+    try:
+        rels = _http_json(base + "?per_page=15")
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 429):
+            raise RuntimeError("GitHub tạm giới hạn lượt truy cập (rate limit). Đợi khoảng 1 tiếng rồi thử lại, "
+                               "hoặc dùng nút “Chọn file .zip llama.cpp” để cài thủ công.")
+        raise
+    rels = [r for r in (rels if isinstance(rels, list) else []) if not r.get("draft")]
+    # lượt 1: đúng loại yêu cầu (CUDA phải có cả gói cudart); lượt 2: chấp nhận bản dự phòng
+    for strict in (True, False):
+        for rel in rels:
+            assets = _pick_assets(rel.get("assets", []), backend, fallback=not strict)
+            if assets:
+                return rel, assets
+    try:
+        rel = _http_json(base + "/latest")
+        assets = _pick_assets(rel.get("assets", []), backend)
+        if assets:
+            return rel, assets
+    except Exception:  # noqa
+        pass
+    raise RuntimeError("Không tìm thấy gói llama.cpp cho Windows trên GitHub. Hãy thử lại sau ít phút, "
+                       "hoặc tải thủ công rồi bấm “Chọn file .zip llama.cpp”.")
+
+
+def _install_zips(zips, version, backend, t=None):
+    if t:
+        t["msg"] = "Đang giải nén…"
+    stop_server()
+    target = os.path.join(engine_dir(), "bin")
+    if os.path.isdir(target):
+        shutil.rmtree(target, ignore_errors=True)
+    os.makedirs(target, exist_ok=True)
+    for z in zips:
+        with zipfile.ZipFile(z) as zf:
+            zf.extractall(target)
+    exe = _find_server_exe()
+    if not exe:
+        raise RuntimeError("Gói này không có llama-server. Hãy chọn gói llama-…-bin-win-…-x64.zip.")
+    if not IS_WIN:
+        os.chmod(exe, 0o755)
+    with open(os.path.join(engine_dir(), "engine.json"), "w", encoding="utf-8") as f:
+        json.dump({"version": version, "backend": backend, "assets": [os.path.basename(z) for z in zips]}, f)
+
+
+def install_engine_from_files(files):
+    """Cài thủ công từ các file .zip người dùng đã tải về (gói llama + gói cudart nếu có)."""
+    files = [f for f in files if f and os.path.isfile(f)]
+    if not files:
+        raise RuntimeError("Chưa chọn file .zip")
+    names = " ".join(os.path.basename(f).lower() for f in files)
+    backend = "cuda" if "cuda" in names else ("vulkan" if "vulkan" in names else "cpu")
+    m = re.search(r"llama-(b\d+)-", names)
+    _install_zips(files, m.group(1) if m else "thủ công", backend)
+    return engine_info()
 
 
 def install_engine(backend=None):
@@ -271,10 +344,7 @@ def install_engine(backend=None):
 
     def job(t):
         t["msg"] = "Đang tìm bản llama.cpp mới nhất…"
-        rel = _http_json(f"{GH_API}/repos/ggml-org/llama.cpp/releases/latest")
-        assets = _pick_assets(rel.get("assets", []), backend)
-        if not assets:
-            raise RuntimeError("Không tìm thấy gói llama.cpp phù hợp cho Windows.")
+        rel, assets = _find_release(backend)
         t["total"] = sum(a.get("size", 0) for a in assets)
         tmp = os.path.join(engine_dir(), "_dl")
         os.makedirs(tmp, exist_ok=True)
@@ -286,25 +356,8 @@ def install_engine(backend=None):
             _download(a["browser_download_url"], dest, t, f"Đang tải {a['name']}…")
             zips.append(dest)
             base += a.get("size", 0)
-        t["msg"] = "Đang giải nén…"
-        stop_server()
-        target = os.path.join(engine_dir(), "bin")
-        if os.path.isdir(target):
-            shutil.rmtree(target, ignore_errors=True)
-        os.makedirs(target, exist_ok=True)
-        for z in zips:
-            with zipfile.ZipFile(z) as zf:
-                zf.extractall(target)
+        _install_zips(zips, rel.get("tag_name", ""), backend, t)
         shutil.rmtree(tmp, ignore_errors=True)
-        if not IS_WIN:
-            exe = _find_server_exe()
-            if exe:
-                os.chmod(exe, 0o755)
-        with open(os.path.join(engine_dir(), "engine.json"), "w", encoding="utf-8") as f:
-            json.dump({"version": rel.get("tag_name", ""), "backend": backend,
-                       "assets": [a["name"] for a in assets]}, f)
-        if not _find_server_exe():
-            raise RuntimeError("Gói tải về không có llama-server.")
         t["msg"] = f"Đã cài llama.cpp {rel.get('tag_name', '')} ({backend})"
     return _run_task(t, job)
 
